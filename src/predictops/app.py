@@ -5,8 +5,8 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 
+from predictops.config import MODEL_PATH
 from predictops.schemas import InfoResponse, PredictRequest, PredictResponse
-from predictops.train import MODEL_PATH
 
 
 def _load_model() -> Any | None:

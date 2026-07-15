@@ -8,8 +8,8 @@ import pandas as pd
 from evidently.metric_preset import DataDriftPreset
 from evidently.report import Report
 
+from predictops.config import EXPERIMENT_NAME
 from predictops.data import TARGET_COL, load_dataset
-from predictops.train import EXPERIMENT_NAME
 
 RANDOM_STATE = 42
 NOISE_STD_MULTIPLIER = 1.5

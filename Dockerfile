@@ -14,7 +14,9 @@ RUN python -m predictops.train
 FROM python:3.12-slim AS final
 WORKDIR /app
 
-COPY --from=builder /usr/local /usr/local
+COPY requirements-serve.txt .
+RUN pip install --no-cache-dir -r requirements-serve.txt
+
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/models ./models
 

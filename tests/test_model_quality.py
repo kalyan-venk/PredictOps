@@ -3,8 +3,9 @@
 import joblib
 from sklearn.model_selection import train_test_split
 
+from predictops.config import MODEL_PATH, RANDOM_STATE, TEST_SIZE
 from predictops.data import TARGET_COL, load_dataset
-from predictops.train import MODEL_PATH, RANDOM_STATE, TEST_SIZE, evaluate_on_test, main
+from predictops.train import evaluate_on_test, main
 
 ROC_AUC_THRESHOLD = 0.80
 

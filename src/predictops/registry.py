@@ -3,7 +3,7 @@
 import mlflow
 from mlflow.tracking import MlflowClient
 
-from predictops.train import EXPERIMENT_NAME
+from predictops.config import EXPERIMENT_NAME
 
 MODEL_NAME = "predictops-classifier"
 

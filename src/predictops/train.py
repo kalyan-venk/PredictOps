@@ -1,7 +1,5 @@
 """Train candidate models, compare them, log to MLflow, and persist the winner."""
 
-from pathlib import Path
-
 import joblib
 import mlflow
 import mlflow.sklearn
@@ -15,13 +13,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
+from predictops.config import EXPERIMENT_NAME, MODEL_PATH, N_SPLITS, RANDOM_STATE, TEST_SIZE
 from predictops.data import TARGET_COL, load_dataset
-
-RANDOM_STATE = 42
-TEST_SIZE = 0.2
-N_SPLITS = 5
-MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "model.joblib"
-EXPERIMENT_NAME = "predictops"
 
 
 def build_preprocessor() -> ColumnTransformer:
