@@ -15,13 +15,13 @@ and automated drift detection. The model itself is a simple tabular binary class
   as nested MLflow runs, winner persisted with `joblib`.
 - **Serving** (`predictops.app`) — FastAPI with `/health`, `/predict`, `/info`, `/reload`.
 - **CI eval gate** (`.github/workflows/ci.yml`, `tests/test_model_quality.py`) — lint, test,
-  and a hard `ROC-AUC >= 0.78` assertion. A model that regresses below the bar fails the build.
+  and a hard `ROC-AUC >= 0.80` assertion. A model that regresses below the bar fails the build.
 - **Registry & promotion** (`predictops.registry`) — registers the best run's model and
   transitions it `Staging -> Production`.
-- **Drift detection** (`predictops.drift`) — Evidently `DataDriftPreset` comparing a reference
-  split against a synthetically shifted "current" split, with a custom drift-share threshold
-  (independent of Evidently's own coarser dataset-level flag) that trips a warning and logs the
-  score to MLflow.
+- **Drift detection** (`predictops.drift`) — Evidently `DataDriftPreset` configured with PSI
+  (Population Stability Index) as the per-column stattest, comparing a reference split against a
+  synthetically shifted "current" split. Trips a warning when any feature's PSI exceeds 0.15 and
+  logs every feature's PSI to MLflow.
 - **Containerization** — multi-stage `Dockerfile` (build/train in one stage, slim runtime in
   the next) + `docker-compose.yml` for one-command startup.
 
@@ -35,7 +35,7 @@ flowchart LR
     subgraph Train
         A[load dataset] --> B[train: LogReg vs XGBoost]
         B --> C[MLflow nested runs]
-        C --> D[eval gate: ROC-AUC >= 0.78]
+        C --> D[eval gate: ROC-AUC >= 0.80]
     end
     D -->|pass| E[registry: Staging -> Production]
     D -->|fail| X[CI blocks merge]

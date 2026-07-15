@@ -1,4 +1,4 @@
-"""Detect feature drift between a reference dataset and current (possibly shifted) data."""
+"""Detect per-feature drift (PSI) between a reference dataset and current (possibly shifted) data."""
 
 from pathlib import Path
 
@@ -13,7 +13,7 @@ from predictops.train import EXPERIMENT_NAME
 
 RANDOM_STATE = 42
 NOISE_STD_MULTIPLIER = 1.5
-DRIFT_SHARE_THRESHOLD = 0.15
+PSI_ALERT_THRESHOLD = 0.15
 REPORT_PATH = Path(__file__).resolve().parents[2] / "reports" / "drift_report.html"
 
 
@@ -34,22 +34,31 @@ def simulate_drift(
 
 
 def run_drift_report(reference: pd.DataFrame, current: pd.DataFrame) -> dict:
-    """Run Evidently's data-drift preset and return a summary dict, saving the HTML report."""
+    """Run Evidently's data-drift preset with PSI as the per-column stattest, save the HTML
+    report, and return a summary including per-feature PSI scores."""
     ref_features = reference.drop(columns=[TARGET_COL])
     cur_features = current.drop(columns=[TARGET_COL])
 
-    report = Report(metrics=[DataDriftPreset()])
+    report = Report(metrics=[DataDriftPreset(stattest="psi", stattest_threshold=PSI_ALERT_THRESHOLD)])
     report.run(reference_data=ref_features, current_data=cur_features)
 
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     report.save_html(str(REPORT_PATH))
 
-    drift_result = report.as_dict()["metrics"][0]["result"]
+    result = report.as_dict()
+    dataset_result = result["metrics"][0]["result"]
+    table_result = result["metrics"][1]["result"]
+
+    per_feature_psi = {
+        col: r["drift_score"] for col, r in table_result["drift_by_columns"].items()
+    }
+
     return {
-        "number_of_columns": drift_result["number_of_columns"],
-        "number_of_drifted_columns": drift_result["number_of_drifted_columns"],
-        "share_of_drifted_columns": drift_result["share_of_drifted_columns"],
-        "evidently_dataset_drift": drift_result["dataset_drift"],
+        "number_of_columns": dataset_result["number_of_columns"],
+        "number_of_drifted_columns": dataset_result["number_of_drifted_columns"],
+        "share_of_drifted_columns": dataset_result["share_of_drifted_columns"],
+        "per_feature_psi": per_feature_psi,
+        "max_psi": max(per_feature_psi.values()),
     }
 
 
@@ -59,21 +68,25 @@ def main() -> dict:
     current = simulate_drift(df.drop(reference.index))
 
     summary = run_drift_report(reference, current)
-    triggered = summary["share_of_drifted_columns"] >= DRIFT_SHARE_THRESHOLD
+    triggered = summary["max_psi"] > PSI_ALERT_THRESHOLD
     summary["drift_warning_triggered"] = triggered
 
     mlflow.set_experiment(EXPERIMENT_NAME)
     with mlflow.start_run(run_name="drift_check"):
-        mlflow.log_param("drift_share_threshold", DRIFT_SHARE_THRESHOLD)
-        mlflow.log_metric("share_of_drifted_columns", summary["share_of_drifted_columns"])
+        mlflow.log_param("psi_alert_threshold", PSI_ALERT_THRESHOLD)
+        mlflow.log_metric("max_psi", summary["max_psi"])
         mlflow.log_metric("number_of_drifted_columns", summary["number_of_drifted_columns"])
+        mlflow.log_metric("share_of_drifted_columns", summary["share_of_drifted_columns"])
+        for feature, psi in summary["per_feature_psi"].items():
+            mlflow.log_metric(f"psi_{feature}", psi)
         mlflow.log_artifact(str(REPORT_PATH))
 
     print(f"Drift summary: {summary}")
     if triggered:
+        worst_feature = max(summary["per_feature_psi"], key=summary["per_feature_psi"].get)
         print(
-            f"[WARNING] share_of_drifted_columns={summary['share_of_drifted_columns']:.2f} "
-            f">= threshold={DRIFT_SHARE_THRESHOLD}. Investigate upstream data."
+            f"[WARNING] {worst_feature} PSI={summary['max_psi']:.4f} "
+            f"> threshold={PSI_ALERT_THRESHOLD}. Investigate upstream data."
         )
     else:
         print("No significant drift detected.")

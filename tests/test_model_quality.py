@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 from predictops.data import TARGET_COL, load_dataset
 from predictops.train import MODEL_PATH, RANDOM_STATE, TEST_SIZE, evaluate_on_test, main
 
-ROC_AUC_THRESHOLD = 0.78
+ROC_AUC_THRESHOLD = 0.80
 
 
 def test_winning_model_clears_roc_auc_gate() -> None:
