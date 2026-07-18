@@ -1,5 +1,7 @@
 """Train candidate models, compare them, log to MLflow, and persist the winner."""
 
+import json
+
 import joblib
 import mlflow
 import mlflow.sklearn
@@ -13,7 +15,15 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
-from predictops.config import EXPERIMENT_NAME, MODEL_PATH, N_SPLITS, RANDOM_STATE, TEST_SIZE
+from predictops.config import (
+    EXPERIMENT_NAME,
+    MODEL_META_PATH,
+    MODEL_PATH,
+    N_SPLITS,
+    ONNX_MODEL_PATH,
+    RANDOM_STATE,
+    TEST_SIZE,
+)
 from predictops.data import TARGET_COL, load_dataset
 
 
@@ -25,9 +35,15 @@ def build_preprocessor() -> ColumnTransformer:
             ("scale", StandardScaler()),
         ]
     )
+    # No imputer on the categorical branch: every categorical feature is a
+    # schema-constrained Literal enum (see schemas.PredictRequest), so a
+    # missing/unknown category cannot reach inference, and the training data
+    # has zero missing categoricals. Dropping it keeps predictions identical
+    # (verified) while making the fitted pipeline exportable to ONNX — the
+    # ONNX imputer op does not support float-sentinel missing values on
+    # string columns.
     categorical_pipeline = Pipeline(
         steps=[
-            ("impute", SimpleImputer(strategy="most_frequent")),
             ("encode", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
@@ -64,6 +80,59 @@ def build_candidates() -> dict[str, Pipeline]:
             ]
         ),
     }
+
+
+def export_onnx(pipeline: Pipeline, X_train, model_name: str) -> None:
+    """Export the fitted pipeline to ONNX so the serving image can run it with
+    onnxruntime alone — no scikit-learn, xgboost, pandas, or scipy at runtime.
+    This is what lets the final container drop the entire scientific stack.
+
+    Each column becomes its own typed input: numeric columns as float tensors
+    (integer-valued columns like tenure are fed as floats — numerically
+    identical through impute/scale/linear ops), object columns as string
+    tensors. `zipmap=False` makes the classifier emit a plain probability
+    array instead of a list of dicts.
+    """
+    from skl2onnx import convert_sklearn
+    from skl2onnx.common.data_types import FloatTensorType, StringTensorType
+
+    if model_name == "xgboost":
+        # XGBClassifier has no built-in skl2onnx converter; register the one
+        # onnxmltools ships before converting a pipeline that contains it.
+        from onnxmltools.convert.xgboost.operator_converters.XGBoost import convert_xgboost
+        from skl2onnx import update_registered_converter
+        from skl2onnx.common.shape_calculator import (
+            calculate_linear_classifier_output_shapes,
+        )
+
+        update_registered_converter(
+            XGBClassifier,
+            "XGBoostXGBClassifier",
+            calculate_linear_classifier_output_shapes,
+            convert_xgboost,
+            options={"nocl": [True, False], "zipmap": [True, False, "columns"]},
+        )
+
+    initial_types = [
+        (
+            col,
+            StringTensorType([None, 1])
+            if str(X_train.dtypes[col]) == "object"
+            else FloatTensorType([None, 1]),
+        )
+        for col in X_train.columns
+    ]
+    onnx_model = convert_sklearn(
+        pipeline,
+        initial_types=initial_types,
+        options={id(pipeline): {"zipmap": False}},
+        target_opset=17,
+    )
+    ONNX_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ONNX_MODEL_PATH.write_bytes(onnx_model.SerializeToString())
+    MODEL_META_PATH.write_text(
+        json.dumps({"classifier_type": type(pipeline.named_steps["classifier"]).__name__})
+    )
 
 
 def cross_validate(pipeline: Pipeline, X_train, y_train) -> tuple[float, float]:
@@ -120,7 +189,9 @@ def main() -> str:
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(best_pipeline, MODEL_PATH)
+    export_onnx(best_pipeline, X_train, best_name)
     print(f"\nWinner: {best_name} (cv_roc_auc={best_cv_auc:.4f}) -> saved to {MODEL_PATH}")
+    print(f"ONNX serving artifact -> {ONNX_MODEL_PATH}")
     return best_run_id
 
 
