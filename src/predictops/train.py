@@ -162,6 +162,12 @@ def main() -> str:
         X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
     )
 
+    # DEMO — REVERT BEFORE MERGE: deliberately scramble the training labels so
+    # the winning model is no better than chance. This ships a degraded model to
+    # prove the CI eval gate (assert roc_auc >= 0.80 in tests/test_model_quality)
+    # actually catches it and turns the pipeline red.
+    y_train = y_train.sample(frac=1, random_state=0).reset_index(drop=True)
+
     mlflow.set_experiment(EXPERIMENT_NAME)
 
     best_name, best_pipeline, best_cv_auc, best_run_id = None, None, -1.0, None
